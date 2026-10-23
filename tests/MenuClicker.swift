@@ -61,6 +61,15 @@ func find(in root: AXUIElement, depth: Int = 20, _ match: (AXUIElement) -> Bool)
     return nil
 }
 
+func findAll(in root: AXUIElement, depth: Int = 20, _ match: (AXUIElement) -> Bool) -> [AXUIElement] {
+    var found = match(root) ? [root] : []
+    guard depth > 0, role(root) != kAXMenuBarRole else { return found }
+    for child in elements(root, kAXChildrenAttribute) {
+        found += findAll(in: child, depth: depth - 1, match)
+    }
+    return found
+}
+
 func dump(_ element: AXUIElement, indent: String = "", depth: Int = 6) {
     print(indent + role(element), string(element, kAXTitleAttribute) ?? "", actions(element).joined(separator: ","))
     guard depth > 0 else { return }
@@ -89,6 +98,9 @@ func pressEscape() {
 
 // MARK: - 主流程
 
+// CI 上标准输出不是终端，默认整块缓冲；改成按行输出，日志顺序才和错误信息对得上
+setvbuf(stdout, nil, _IOLBF, 0)
+
 var args = Array(CommandLine.arguments.dropFirst())
 let mode = args.first?.hasPrefix("--") == true ? args.removeFirst() : ""
 
@@ -109,7 +121,10 @@ AXUIElementSetMessagingTimeout(app, 3)
 guard let window = element(app, kAXFocusedWindowAttribute) ?? elements(app, kAXWindowsAttribute).first else {
     fail("找不到 Finder 窗口")
 }
-guard let outline = find(in: window, { role($0) == kAXOutlineRole }) else {
+// 侧边栏也是 AXOutline，但只有一列；文件列表有名称、日期、大小等多列
+let outlines = findAll(in: window) { role($0) == kAXOutlineRole }
+guard let outline = outlines.max(by: { elements($0, kAXColumnsAttribute).count < elements($1, kAXColumnsAttribute).count }),
+      elements(outline, kAXColumnsAttribute).count > 1 else {
     dump(window)
     fail("窗口里找不到列表视图（AXOutline）")
 }
