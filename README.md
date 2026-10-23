@@ -85,3 +85,7 @@ host/             宿主 App：苹果规定扩展必须装在一个 App 里，�
 修改代码后执行 `./build.sh install` 即可重新安装，脚本会自动重启扩展进程。
 
 App 使用本地临时签名（ad-hoc），没有苹果开发者证书也能编译使用。如果要公开分发给其他人，需要加入 Apple Developer Program，用 Developer ID 签名并公证，对方才能直接打开。
+
+## 许可证
+
+[MIT](LICENSE)
