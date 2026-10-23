@@ -47,10 +47,15 @@ if [[ "${1:-}" == "install" ]]; then
     /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
         -f -R ~/Applications/CopyPathSync.app
     open ~/Applications/CopyPathSync.app
-    sleep 2
-    pluginkit -e use -i com.ludafa.finderplus.extension
-    # 结束旧的扩展进程，Finder 会按需启动新版本
+    # 等系统注册好扩展再启用，首次安装可能要几秒
+    for _ in $(seq 30); do
+        pluginkit -m -i com.ludafa.finderplus.extension | grep -q com.ludafa && break
+        sleep 0.5
+    done
+    # 停用 → 结束旧进程 → 启用，Finder 会立刻启动新版本；只结束进程的话 Finder 不一定及时重启它
+    pluginkit -e ignore -i com.ludafa.finderplus.extension
     pkill -x CopyPathExtension || true
+    pluginkit -e use -i com.ludafa.finderplus.extension
 fi
 
 echo "==> 完成"

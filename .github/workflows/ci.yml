@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 环境信息
+        run: |
+          sw_vers
+          swiftc --version
+          csrutil status || true
+          pgrep -lx Finder || echo "Finder 没有运行"
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+            "select client, auth_value from access where service = 'kTCCServiceAccessibility'" || true
+
+      - name: 第一层：编译与签名检查
+        run: ./build.sh && tests/check-build.sh
+
+      - name: 第二层：安装并确认 Finder 加载了扩展
+        run: ./build.sh install && tests/check-install.sh
+
+      - name: 第三层：点击右键菜单并检查剪贴板
+        run: tests/e2e-menu.sh
+
+      - name: 失败时截屏
+        if: failure()
+        run: screencapture -x "$RUNNER_TEMP/screen.png" || true
+
+      - name: 上传截屏
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshot-${{ matrix.os }}
+          path: ${{ runner.temp }}/screen.png
+          if-no-files-found: ignore
