@@ -98,6 +98,13 @@ func rightClick(at point: CGPoint) {
     })
 }
 
+func leftClick(at point: CGPoint) {
+    let source = CGEventSource(stateID: .hidSystemState)
+    post([CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp].map {
+        CGEvent(mouseEventSource: source, mouseType: $0, mouseCursorPosition: point, mouseButton: .left)
+    })
+}
+
 func pressEscape() {
     post([true, false].map { CGEvent(keyboardEventSource: nil, virtualKey: 0x35, keyDown: $0) })
 }
@@ -150,7 +157,12 @@ func select(_ rows: [AXUIElement]) {
 }
 
 if flags.contains("--select-first") {
-    select(Array(elements(requireFileList(), kAXRowsAttribute).prefix(1)))
+    // 窗口刚弹过菜单时，用辅助功能接口设置单个选中项不一定生效，所以像真人一样点一下第一行
+    guard let first = elements(requireFileList(), kAXRowsAttribute).first, let rowFrame = frame(first) else {
+        fail("列表里没有可选的项目")
+    }
+    leftClick(at: CGPoint(x: rowFrame.minX + 60, y: rowFrame.midY))
+    usleep(300_000)
 } else if flags.contains("--select-all") {
     select(elements(requireFileList(), kAXRowsAttribute))
 } else if flags.contains("--select-none") {
