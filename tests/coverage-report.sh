@@ -39,8 +39,8 @@ seen = set()
 for function in json.load(sys.stdin)["data"][0]["functions"]:
     for line, column, _, _, count, file_id, _, kind in function["regions"]:
         path = function["filenames"][file_id]
-        # kind 0 是普通代码块；同一份源码被两个程序各统计一次，去重
-        if count or kind != 0 or (path, line, column) in seen:
+        # kind 0 是普通代码块；测试代码本身不计入（导出的数据里仍带着它）；同一份源码被两个程序各统计一次，去重
+        if count or kind != 0 or "/tests/" in path or (path, line, column) in seen:
             continue
         seen.add((path, line, column))
         print(f"{line}:{column}  {open(path).read().splitlines()[line - 1].strip()}")
