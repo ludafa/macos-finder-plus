@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 APP=build/CopyPathSync.app
 EXT=$APP/Contents/PlugIns/CopyPathExtension.appex
 
-plutil -lint host/Info.plist extension/Info.plist extension/Extension.entitlements
+plutil -lint host/Info.plist extension/Info.plist extension/*.entitlements
 codesign --verify --deep --strict --verbose=2 "$APP"
 
 # Finder 扩展必须开启沙盒，否则系统不会加载

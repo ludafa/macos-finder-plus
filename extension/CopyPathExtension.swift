@@ -8,6 +8,7 @@ class FinderSync: FIFinderSync {
         super.init()
         // 监听整个磁盘，这样任何文件夹里都能拿到 targetedURL
         FIFinderSyncController.default().directoryURLs = [URL(fileURLWithPath: "/")]
+        flushCoverage()
     }
 
     // macOS 中文版里“复制”是制作副本，放到剪贴板叫“拷贝”，这里跟系统用词保持一致
@@ -59,6 +60,7 @@ class FinderSync: FIFinderSync {
 
     // 工具栏按钮、右键选中项、右键窗口空白处，三处用同一个菜单项
     override func menu(for menuKind: FIMenuKind) -> NSMenu? {
+        defer { flushCoverage() }
         let selectedCount = FIFinderSyncController.default().selectedItemURLs()?.count ?? 0
         let title: String
         switch menuKind {
@@ -79,6 +81,7 @@ class FinderSync: FIFinderSync {
 
     // 有选中项就复制选中项（每行一个），否则复制窗口所在文件夹
     @objc func copyPath(_ sender: AnyObject?) {
+        defer { flushCoverage() }
         let controller = FIFinderSyncController.default()
         var urls = controller.selectedItemURLs() ?? []
         if urls.isEmpty, let target = controller.targetedURL() {
@@ -93,3 +96,20 @@ class FinderSync: FIFinderSync {
         NSSound(named: "Pop")?.play()
     }
 }
+
+#if COVERAGE
+// 覆盖率统计，仅在 COVERAGE=1 ./build.sh 编译时启用。
+// 扩展进程通常被直接结束，来不及在退出时写数据，所以每次被 Finder 调用后都主动写一次；
+// 沙盒只允许写这个目录（见 Extension.coverage.entitlements）
+@_silgen_name("__llvm_profile_set_filename") private func llvmProfileSetFilename(_ name: UnsafePointer<CChar>)
+@_silgen_name("__llvm_profile_write_file") private func llvmProfileWriteFile() -> Int32
+
+private let coverageFileConfigured: Void = llvmProfileSetFilename("/private/tmp/finderplus-coverage/extension-%p.profraw")
+
+func flushCoverage() {
+    _ = coverageFileConfigured
+    _ = llvmProfileWriteFile()
+}
+#else
+@inline(__always) func flushCoverage() {}
+#endif
