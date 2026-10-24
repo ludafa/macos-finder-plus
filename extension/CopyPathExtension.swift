@@ -2,6 +2,8 @@ import Cocoa
 import FinderSync
 
 // 官方 Finder Sync 扩展：在工具栏按钮菜单和右键菜单里提供“拷贝路径”。
+// 和 Finder 打交道的部分放在 FinderSync 类里，由端到端测试覆盖；
+// 不依赖 Finder 的判断逻辑放在 CopyPath 里，界面上触发不到的边界情况由单元测试覆盖。
 class FinderSync: FIFinderSync {
 
     override init() {
@@ -58,41 +60,58 @@ class FinderSync: FIFinderSync {
         return image
     }
 
-    // 工具栏按钮、右键选中项、右键窗口空白处，三处用同一个菜单项
     override func menu(for menuKind: FIMenuKind) -> NSMenu? {
         defer { flushCoverage() }
-        let selectedCount = FIFinderSyncController.default().selectedItemURLs()?.count ?? 0
-        let title: String
-        switch menuKind {
-        case .toolbarItemMenu:
-            title = selectedCount > 0 ? "拷贝 \(selectedCount) 个选中项的路径" : "拷贝当前路径"
-        case .contextualMenuForItems:
-            title = selectedCount > 1 ? "拷贝 \(selectedCount) 个项目的路径" : "拷贝路径"
-        case .contextualMenuForContainer:
-            title = "拷贝当前路径"
-        default:
-            return nil
-        }
+        let selected = FIFinderSyncController.default().selectedItemURLs()
+        guard let title = CopyPath.menuTitle(for: menuKind, selected: selected) else { return nil }
         let menu = NSMenu(title: "")
         let item = menu.addItem(withTitle: title, action: #selector(copyPath(_:)), keyEquivalent: "")
         item.image = menuIcon()
         return menu
     }
 
-    // 有选中项就复制选中项（每行一个），否则复制窗口所在文件夹
     @objc func copyPath(_ sender: AnyObject?) {
         defer { flushCoverage() }
         let controller = FIFinderSyncController.default()
-        var urls = controller.selectedItemURLs() ?? []
-        if urls.isEmpty, let target = controller.targetedURL() {
-            urls = [target]
+        let paths = CopyPath.paths(selected: controller.selectedItemURLs(), target: controller.targetedURL())
+        CopyPath.copy(paths, to: .general)
+    }
+}
+
+enum CopyPath {
+
+    // 工具栏按钮、右键选中项、右键窗口空白处，三处用同一个菜单项；侧边栏等其他菜单不提供
+    static func menuTitle(for kind: FIMenuKind, selected: [URL]?) -> String? {
+        let count = selected?.count ?? 0
+        switch kind {
+        case .toolbarItemMenu:
+            return count > 0 ? "拷贝 \(count) 个选中项的路径" : "拷贝当前路径"
+        case .contextualMenuForItems:
+            return count > 1 ? "拷贝 \(count) 个项目的路径" : "拷贝路径"
+        case .contextualMenuForContainer:
+            return "拷贝当前路径"
+        default:
+            return nil
         }
-        guard !urls.isEmpty else {
+    }
+
+    // 有选中项就拷贝选中项，否则拷贝窗口所在文件夹。
+    // 右键空白处时 Finder 会把当前文件夹当成选中项传进来；点工具栏按钮且没有选中项时才会用到 target
+    static func paths(selected: [URL]?, target: URL?) -> [String] {
+        if let selected, !selected.isEmpty {
+            return selected.map(\.path)
+        }
+        return target.map { [$0.path] } ?? []
+    }
+
+    // 多个路径每行一个；没有可拷贝的路径时不改动剪贴板，只响提示音
+    static func copy(_ paths: [String], to pasteboard: NSPasteboard) {
+        guard !paths.isEmpty else {
             NSSound.beep()
             return
         }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(urls.map(\.path).joined(separator: "\n"), forType: .string)
+        pasteboard.clearContents()
+        pasteboard.setString(paths.joined(separator: "\n"), forType: .string)
         NSSound(named: "Pop")?.play()
     }
 }

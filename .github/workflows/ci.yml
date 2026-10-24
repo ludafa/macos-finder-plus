@@ -28,6 +28,9 @@ jobs:
       - name: 第一层：编译与签名检查
         run: ./build.sh && tests/check-build.sh
 
+      - name: 单元测试
+        run: COVERAGE=1 tests/unit-tests.sh
+
       # 第二、三层安装带覆盖率统计的版本，测完生成覆盖率报告
       - name: 第二层：安装并确认 Finder 加载了扩展
         run: COVERAGE=1 ./build.sh install && tests/check-install.sh
