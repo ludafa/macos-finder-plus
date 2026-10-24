@@ -32,10 +32,20 @@ xcrun llvm-cov report "${COV_ARGS[@]}" | tee "$OUT/report.txt"
 xcrun llvm-cov show "${COV_ARGS[@]}" -format=html -output-dir="$OUT/html"
 xcrun llvm-cov export "${COV_ARGS[@]}" -format=lcov >"$OUT/coverage.lcov"
 
-# 列出没被执行到的代码行（行号 | 执行次数 0 | 代码）
-xcrun llvm-cov show "${COV_ARGS[@]}" -format=text \
-    | grep -E '^ *[0-9]+\| +0\|' >"$OUT/uncovered.txt" || true
-echo "未覆盖的行："
+# 列出没执行到的代码块（行:列  代码）。某一行执行过、但其中一个分支没走到时，只看行覆盖率是发现不了的
+xcrun llvm-cov export "${COV_ARGS[@]}" -format=text | python3 -I -c '
+import json, sys
+seen = set()
+for function in json.load(sys.stdin)["data"][0]["functions"]:
+    for line, column, _, _, count, file_id, _, kind in function["regions"]:
+        path = function["filenames"][file_id]
+        # kind 0 是普通代码块；同一份源码被两个程序各统计一次，去重
+        if count or kind != 0 or (path, line, column) in seen:
+            continue
+        seen.add((path, line, column))
+        print(f"{line}:{column}  {open(path).read().splitlines()[line - 1].strip()}")
+' >"$OUT/uncovered.txt"
+echo "未覆盖的代码块："
 cat "$OUT/uncovered.txt"
 
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
@@ -44,7 +54,7 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
         echo '```'
         cat "$OUT/report.txt"
         echo '```'
-        echo "### 未覆盖的行"
+        echo "### 未覆盖的代码块（行:列）"
         echo '```swift'
         cat "$OUT/uncovered.txt"
         echo '```'

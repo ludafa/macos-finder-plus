@@ -36,6 +36,22 @@ struct UnitTests {
         expect(CopyPath.paths(selected: nil, target: dir), [dir.path], "Finder 返回 nil 时拷贝当前文件夹")
         expect(CopyPath.paths(selected: nil, target: nil), [], "没有选中项也没有当前文件夹")
 
+        print("菜单图标")
+        for dark in [false, true] {
+            let mode = dark ? "深色模式" : "浅色模式"
+            let icon = CopyPath.menuIcon(dark: dark)
+            expect(icon.size, NSSize(width: 16, height: 16), "\(mode)：尺寸 16×16pt，与 Finder 菜单里的系统图标对齐")
+            expect(icon.isTemplate, true, "\(mode)：标记为模板图")
+            guard let rep = icon.representations.first as? NSBitmapImageRep else {
+                expect(false, true, "\(mode)：图标是位图")
+                continue
+            }
+            expect(rep.colorAt(x: 0, y: 0)?.alphaComponent, 0, "\(mode)：背景透明，不是实心块")
+            let pixels = (0..<rep.pixelsWide).flatMap { x in (0..<rep.pixelsHigh).compactMap { rep.colorAt(x: x, y: $0) } }
+            let stroke = pixels.first { $0.alphaComponent > 0.5 }?.usingColorSpace(.sRGB)
+            expect(stroke.map { $0.brightnessComponent > 0.5 }, dark, "\(mode)：线条颜色与背景形成对比")
+        }
+
         print("写入剪贴板（使用独立的剪贴板，不影响系统剪贴板）")
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.ludafa.finderplus.unit-tests"))
         pasteboard.clearContents()

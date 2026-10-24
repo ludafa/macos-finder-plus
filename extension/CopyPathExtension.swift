@@ -23,50 +23,13 @@ class FinderSync: FIFinderSync {
         NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "拷贝路径")!
     }
 
-    // 菜单里直接放 SF Symbol 会被 Finder 画成实心块，所以先按系统菜单图标的尺寸画成位图，
-    // 颜色跟随当前深浅色模式；同时标记为模板图，Finder 若支持会自行着色
-    private func menuIcon() -> NSImage {
-        // 10pt 与 Finder 右键菜单里系统图标的实际尺寸一致（按截图像素量过）
-        let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .regular)
-        let symbol = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)!
-            .withSymbolConfiguration(config)!
-
-        let isDark = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
-        var color = NSColor.black
-        NSAppearance(named: isDark ? .darkAqua : .aqua)!.performAsCurrentDrawingAppearance {
-            color = NSColor.labelColor.usingColorSpace(.sRGB)!
-        }
-
-        let size = NSSize(width: 16, height: 16)
-        let scale: CGFloat = 2
-        let rep = NSBitmapImageRep(bitmapDataPlanes: nil,
-                                   pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
-                                   bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                                   colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
-        rep.size = size
-
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-        let rect = NSRect(x: (size.width - symbol.size.width) / 2, y: (size.height - symbol.size.height) / 2,
-                          width: symbol.size.width, height: symbol.size.height)
-        symbol.draw(in: rect)
-        color.set()
-        rect.fill(using: .sourceAtop)
-        NSGraphicsContext.restoreGraphicsState()
-
-        let image = NSImage(size: size)
-        image.addRepresentation(rep)
-        image.isTemplate = true
-        return image
-    }
-
     override func menu(for menuKind: FIMenuKind) -> NSMenu? {
         defer { flushCoverage() }
         let selected = FIFinderSyncController.default().selectedItemURLs()
         guard let title = CopyPath.menuTitle(for: menuKind, selected: selected) else { return nil }
         let menu = NSMenu(title: "")
         let item = menu.addItem(withTitle: title, action: #selector(copyPath(_:)), keyEquivalent: "")
-        item.image = menuIcon()
+        item.image = CopyPath.menuIcon(dark: UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark")
         return menu
     }
 
@@ -102,6 +65,42 @@ enum CopyPath {
             return selected.map(\.path)
         }
         return target.map { [$0.path] } ?? []
+    }
+
+    // 菜单里直接放 SF Symbol 会被 Finder 画成实心块，所以先按系统菜单图标的尺寸画成位图，
+    // 颜色按深浅色模式选择；同时标记为模板图，Finder 若支持会自行着色
+    static func menuIcon(dark: Bool) -> NSImage {
+        // 10pt 与 Finder 右键菜单里系统图标的实际尺寸一致（按截图像素量过）
+        let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .regular)
+        let symbol = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)!
+            .withSymbolConfiguration(config)!
+
+        var color = NSColor.black
+        NSAppearance(named: dark ? .darkAqua : .aqua)!.performAsCurrentDrawingAppearance {
+            color = NSColor.labelColor.usingColorSpace(.sRGB)!
+        }
+
+        let size = NSSize(width: 16, height: 16)
+        let scale: CGFloat = 2
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil,
+                                   pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
+                                   bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                   colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        rep.size = size
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        let rect = NSRect(x: (size.width - symbol.size.width) / 2, y: (size.height - symbol.size.height) / 2,
+                          width: symbol.size.width, height: symbol.size.height)
+        symbol.draw(in: rect)
+        color.set()
+        rect.fill(using: .sourceAtop)
+        NSGraphicsContext.restoreGraphicsState()
+
+        let image = NSImage(size: size)
+        image.addRepresentation(rep)
+        image.isTemplate = true
+        return image
     }
 
     // 多个路径每行一个；没有可拷贝的路径时不改动剪贴板，只响提示音
