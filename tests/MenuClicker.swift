@@ -1,12 +1,18 @@
 import AppKit
 import ApplicationServices
 
-// 第三层测试的辅助程序：用辅助功能 API 在 Finder 最前面的窗口（列表视图）里打开右键菜单，并点击指定菜单项。
-// 用法：
-//   MenuClicker <菜单项标题>                 右键当前选中项
-//   MenuClicker --select-all <菜单项标题>    先全选，再右键选中项
-//   MenuClicker --select-none <菜单项标题>   取消选中，右键窗口空白处
-//   MenuClicker --check-trust               只检查是否有辅助功能权限（没有时退出码为 2）
+// 第三层测试的辅助程序：用辅助功能 API 在 Finder 最前面的窗口（列表视图）里打开菜单，并点击指定菜单项。
+// 用法：MenuClicker [选项...] <菜单项标题>
+//   选中方式（可选，默认保持当前选中）：
+//     --select-first     只选中第一项
+//     --select-all       全选
+//     --select-none      取消选中
+//   打开哪个菜单（默认右键当前选中项；配合 --select-none 时右键窗口空白处）：
+//     --toolbar          点工具栏上的「拷贝路径」按钮
+//     --sidebar          右键侧边栏里当前用户的个人文件夹
+//   其他：
+//     --expect-absent    检查菜单里没有这个菜单项（不点击）
+//     --check-trust      只检查是否有辅助功能权限（没有时退出码为 2）
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write((message + "\n").data(using: .utf8)!)
@@ -102,15 +108,18 @@ func pressEscape() {
 setvbuf(stdout, nil, _IOLBF, 0)
 
 var args = Array(CommandLine.arguments.dropFirst())
-let mode = args.first?.hasPrefix("--") == true ? args.removeFirst() : ""
+var flags = Set<String>()
+while let first = args.first, first.hasPrefix("--") {
+    flags.insert(args.removeFirst())
+}
 
 let trusted = AXIsProcessTrusted()
-if mode == "--check-trust" {
+if flags.contains("--check-trust") {
     print("AXIsProcessTrusted = \(trusted)")
     exit(trusted ? 0 : 2)
 }
 guard trusted else { fail("没有辅助功能权限") }
-guard let title = args.first else { fail("用法：MenuClicker [--select-all | --select-none] <菜单项标题>") }
+guard let title = args.first else { fail("用法：MenuClicker [选项...] <菜单项标题>，详见源码开头的说明") }
 
 guard let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first else {
     fail("Finder 没有运行")
@@ -121,43 +130,85 @@ AXUIElementSetMessagingTimeout(app, 3)
 guard let window = element(app, kAXFocusedWindowAttribute) ?? elements(app, kAXWindowsAttribute).first else {
     fail("找不到 Finder 窗口")
 }
-// 侧边栏也是 AXOutline，但只有一列；文件列表有名称、日期、大小等多列
+
+// 侧边栏和文件列表都是 AXOutline：侧边栏只有一列，文件列表有名称、日期、大小等多列
 let outlines = findAll(in: window) { role($0) == kAXOutlineRole }
-guard let outline = outlines.max(by: { elements($0, kAXColumnsAttribute).count < elements($1, kAXColumnsAttribute).count }),
-      elements(outline, kAXColumnsAttribute).count > 1 else {
-    dump(window)
-    fail("窗口里找不到列表视图（AXOutline）")
+let fileList = outlines.first { elements($0, kAXColumnsAttribute).count > 1 }
+let sidebar = outlines.first { elements($0, kAXColumnsAttribute).count == 1 }
+
+func requireFileList() -> AXUIElement {
+    guard let fileList else {
+        dump(window)
+        fail("窗口里找不到列表视图（AXOutline）")
+    }
+    return fileList
 }
 
-switch mode {
-case "--select-all":
-    AXUIElementSetAttributeValue(outline, kAXSelectedRowsAttribute as CFString, elements(outline, kAXRowsAttribute) as CFArray)
-case "--select-none":
-    AXUIElementSetAttributeValue(outline, kAXSelectedRowsAttribute as CFString, [] as CFArray)
-default:
-    break
+func select(_ rows: [AXUIElement]) {
+    AXUIElementSetAttributeValue(requireFileList(), kAXSelectedRowsAttribute as CFString, rows as CFArray)
+    usleep(300_000)
 }
-usleep(300_000)
 
-let selected = elements(outline, kAXSelectedRowsAttribute)
-print("选中 \(selected.count) 项")
+if flags.contains("--select-first") {
+    select(Array(elements(requireFileList(), kAXRowsAttribute).prefix(1)))
+} else if flags.contains("--select-all") {
+    select(elements(requireFileList(), kAXRowsAttribute))
+} else if flags.contains("--select-none") {
+    select([])
+}
+if let fileList {
+    print("选中 \(elements(fileList, kAXSelectedRowsAttribute).count) 项")
+}
+
+// 菜单打开期间“显示菜单/按下”这类动作可能阻塞到菜单关闭，所以放到后台执行
+func performInBackground(_ action: String, on element: AXUIElement) {
+    DispatchQueue.global().async { AXUIElementPerformAction(element, action as CFString) }
+}
+
+func toolbarButton() -> AXUIElement? {
+    guard let toolbar = find(in: window, { role($0) == kAXToolbarRole }) else { return nil }
+    return find(in: toolbar) { candidate in
+        let texts = [kAXTitleAttribute, kAXDescriptionAttribute, kAXHelpAttribute].compactMap { string(candidate, $0) }
+        let names = actions(candidate)
+        return texts.contains { $0.contains("拷贝") }
+            && (names.contains(kAXShowMenuAction) || names.contains(kAXPressAction))
+    }
+}
 
 func showMenu() {
-    if mode == "--select-none" {
+    if flags.contains("--toolbar") {
+        guard let button = toolbarButton() else {
+            find(in: window, { role($0) == kAXToolbarRole }).map { dump($0) }
+            fail("工具栏上找不到「拷贝路径」按钮")
+        }
+        performInBackground(actions(button).contains(kAXShowMenuAction) ? kAXShowMenuAction : kAXPressAction, on: button)
+    } else if flags.contains("--sidebar") {
+        // 个人文件夹在侧边栏里显示为用户名，不受系统语言影响
+        let name = NSUserName()
+        guard let sidebar,
+              let item = find(in: sidebar, { candidate in
+                  [kAXValueAttribute, kAXTitleAttribute, kAXDescriptionAttribute].contains { string(candidate, $0) == name }
+              }),
+              let itemFrame = frame(item) else {
+            sidebar.map { dump($0) }
+            fail("侧边栏里找不到「\(name)」")
+        }
+        rightClick(at: CGPoint(x: itemFrame.midX, y: itemFrame.midY))
+    } else if flags.contains("--select-none") {
         // 右键列表可见区域底部的空白处
-        let visible = element(outline, kAXParentAttribute).flatMap(frame) ?? frame(outline)
-        guard let visible else { fail("拿不到列表的位置") }
+        let list = requireFileList()
+        guard let visible = element(list, kAXParentAttribute).flatMap(frame) ?? frame(list) else { fail("拿不到列表的位置") }
         rightClick(at: CGPoint(x: visible.midX, y: visible.maxY - 20))
-        return
-    }
-    guard let row = selected.first else { fail("没有选中项") }
-    // 优先用辅助功能的“显示菜单”动作（放到后台执行，避免菜单打开期间阻塞），不支持时退回模拟右键
-    if let target = find(in: row, depth: 3, { actions($0).contains(kAXShowMenuAction) }) {
-        DispatchQueue.global().async { AXUIElementPerformAction(target, kAXShowMenuAction as CFString) }
-    } else if let rowFrame = frame(row) {
-        rightClick(at: CGPoint(x: rowFrame.minX + 60, y: rowFrame.midY))
     } else {
-        fail("选中项既不支持显示菜单，也拿不到位置")
+        guard let row = elements(requireFileList(), kAXSelectedRowsAttribute).first else { fail("没有选中项") }
+        // 优先用辅助功能的“显示菜单”动作，不支持时退回模拟右键
+        if let target = find(in: row, depth: 3, { actions($0).contains(kAXShowMenuAction) }) {
+            performInBackground(kAXShowMenuAction, on: target)
+        } else if let rowFrame = frame(row) {
+            rightClick(at: CGPoint(x: rowFrame.minX + 60, y: rowFrame.midY))
+        } else {
+            fail("选中项既不支持显示菜单，也拿不到位置")
+        }
     }
 }
 
@@ -176,6 +227,18 @@ func openMenuTitles() -> [String] {
     }
     collect(app, depth: 20)
     return titles
+}
+
+if flags.contains("--expect-absent") {
+    // 等菜单完整出现后确认没有这个菜单项，再关掉菜单
+    showMenu()
+    sleep(3)
+    let titles = openMenuTitles()
+    pressEscape()
+    guard !titles.isEmpty else { fail("菜单没有打开") }
+    guard !titles.contains(title) else { fail("菜单里不应该有「\(title)」，当前菜单项：\(titles)") }
+    print("菜单里没有「\(title)」，符合预期")
+    exit(0)
 }
 
 // 扩展可能还没准备好，菜单里暂时没有我们的项目；关掉菜单重试几次

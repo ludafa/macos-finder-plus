@@ -58,4 +58,21 @@ $DIR/b c.txt"
 run_case "右键窗口空白处" --select-none "拷贝当前路径"
 expect_clipboard "$DIR"
 
+run_case "有选中项时点工具栏按钮" --toolbar --select-first "拷贝 1 个选中项的路径"
+expect_clipboard "$DIR/a.txt"
+
+run_case "没有选中项时点工具栏按钮" --toolbar --select-none "拷贝当前路径"
+expect_clipboard "$DIR"
+
+# 侧边栏不提供我们的菜单项（扩展对侧边栏菜单返回 nil）
+run_case "右键侧边栏" --sidebar --expect-absent "拷贝路径"
+
+# 「最近使用」没有真实路径：点了菜单项也不应该改动剪贴板
+open /System/Library/CoreServices/Finder.app/Contents/Resources/MyLibraries/myDocuments.cannedSearch
+sleep 2
+run_case "在「最近使用」里点工具栏按钮" --toolbar "拷贝当前路径"
+sleep 1
+[[ -z "$(pbpaste)" ]] || { echo "剪贴板不应该被改动，实际：$(pbpaste)"; exit 1; }
+echo "剪贴板没有被改动，符合预期"
+
 echo "第三层通过"
