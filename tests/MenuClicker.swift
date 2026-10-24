@@ -156,13 +156,26 @@ func select(_ rows: [AXUIElement]) {
     usleep(300_000)
 }
 
+func selectedCount() -> Int {
+    elements(requireFileList(), kAXSelectedRowsAttribute).count
+}
+
 if flags.contains("--select-first") {
-    // 窗口刚弹过菜单时，用辅助功能接口设置单个选中项不一定生效，所以像真人一样点一下第一行
-    guard let first = elements(requireFileList(), kAXRowsAttribute).first, let rowFrame = frame(first) else {
-        fail("列表里没有可选的项目")
+    let rows = elements(requireFileList(), kAXRowsAttribute)
+    guard let first = rows.first else { fail("列表里没有可选的项目") }
+    print("窗口「\(string(window, kAXTitleAttribute) ?? "")」共 \(rows.count) 行，第一行位置 \(frame(first).map { "\($0)" } ?? "未知")")
+    // 依次尝试：设置列表的选中行 → 设置这一行的选中状态 → 鼠标点击
+    select([first])
+    if selectedCount() == 0 {
+        print("设置列表选中行没有生效，改为设置这一行的选中状态")
+        AXUIElementSetAttributeValue(first, kAXSelectedAttribute as CFString, kCFBooleanTrue)
+        usleep(300_000)
     }
-    leftClick(at: CGPoint(x: rowFrame.minX + 60, y: rowFrame.midY))
-    usleep(300_000)
+    if selectedCount() == 0, let rowFrame = frame(first) {
+        print("设置选中状态也没有生效，改为鼠标点击")
+        leftClick(at: CGPoint(x: rowFrame.minX + 60, y: rowFrame.midY))
+        usleep(300_000)
+    }
 } else if flags.contains("--select-all") {
     select(elements(requireFileList(), kAXRowsAttribute))
 } else if flags.contains("--select-none") {

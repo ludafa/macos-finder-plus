@@ -56,5 +56,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: screenshot-${{ matrix.os }}
-          path: ${{ runner.temp }}/screen.png
+          path: ${{ runner.temp }}/*.png
           if-no-files-found: ignore
