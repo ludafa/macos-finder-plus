@@ -4,12 +4,12 @@ import ApplicationServices
 // 第三层测试的辅助程序：用辅助功能 API 在 Finder 最前面的窗口（列表视图）里打开菜单，并点击指定菜单项。
 // 用法：MenuClicker [选项...] <菜单项标题>
 //   选中方式（可选，默认保持当前选中）：
-//     --select-first     只选中第一项
+//     --select <名称>    只选中这个文件
 //     --select-all       全选
 //     --select-none      取消选中
 //   打开哪个菜单（默认右键当前选中项；配合 --select-none 时右键窗口空白处）：
 //     --toolbar          点工具栏上的「拷贝路径」按钮
-//     --sidebar          右键侧边栏里当前用户的个人文件夹
+//     --sidebar          右键侧边栏里的一个文件夹（个人文件夹或「应用程序」）
 //   其他：
 //     --expect-absent    检查菜单里没有这个菜单项（不点击）
 //     --check-trust      只检查是否有辅助功能权限（没有时退出码为 2）
@@ -76,8 +76,13 @@ func findAll(in root: AXUIElement, depth: Int = 20, _ match: (AXUIElement) -> Bo
     return found
 }
 
+// 元素上显示的文字：标题、值、描述
+func texts(_ element: AXUIElement) -> [String] {
+    [kAXTitleAttribute, kAXValueAttribute, kAXDescriptionAttribute].compactMap { string(element, $0) }.filter { !$0.isEmpty }
+}
+
 func dump(_ element: AXUIElement, indent: String = "", depth: Int = 6) {
-    print(indent + role(element), string(element, kAXTitleAttribute) ?? "", actions(element).joined(separator: ","))
+    print(indent + role(element), texts(element), actions(element).joined(separator: ","))
     guard depth > 0 else { return }
     for child in elements(element, kAXChildrenAttribute) { dump(child, indent: indent + "  ", depth: depth - 1) }
 }
@@ -98,13 +103,6 @@ func rightClick(at point: CGPoint) {
     })
 }
 
-func leftClick(at point: CGPoint) {
-    let source = CGEventSource(stateID: .hidSystemState)
-    post([CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp].map {
-        CGEvent(mouseEventSource: source, mouseType: $0, mouseCursorPosition: point, mouseButton: .left)
-    })
-}
-
 func pressEscape() {
     post([true, false].map { CGEvent(keyboardEventSource: nil, virtualKey: 0x35, keyDown: $0) })
 }
@@ -116,8 +114,12 @@ setvbuf(stdout, nil, _IOLBF, 0)
 
 var args = Array(CommandLine.arguments.dropFirst())
 var flags = Set<String>()
+var nameToSelect: String?
 while let first = args.first, first.hasPrefix("--") {
     flags.insert(args.removeFirst())
+    if first == "--select", !args.isEmpty {
+        nameToSelect = args.removeFirst()
+    }
 }
 
 let trusted = AXIsProcessTrusted()
@@ -160,22 +162,15 @@ func selectedCount() -> Int {
     elements(requireFileList(), kAXSelectedRowsAttribute).count
 }
 
-if flags.contains("--select-first") {
+if let nameToSelect {
+    // 按文件名找行；列表的第一行是表头，不能按位置选
     let rows = elements(requireFileList(), kAXRowsAttribute)
-    guard let first = rows.first else { fail("列表里没有可选的项目") }
-    print("窗口「\(string(window, kAXTitleAttribute) ?? "")」共 \(rows.count) 行，第一行位置 \(frame(first).map { "\($0)" } ?? "未知")")
-    // 依次尝试：设置列表的选中行 → 设置这一行的选中状态 → 鼠标点击
-    select([first])
-    if selectedCount() == 0 {
-        print("设置列表选中行没有生效，改为设置这一行的选中状态")
-        AXUIElementSetAttributeValue(first, kAXSelectedAttribute as CFString, kCFBooleanTrue)
-        usleep(300_000)
+    guard let row = rows.first(where: { row in find(in: row, depth: 4) { texts($0).contains(nameToSelect) } != nil }) else {
+        dump(requireFileList())
+        fail("列表里找不到「\(nameToSelect)」")
     }
-    if selectedCount() == 0, let rowFrame = frame(first) {
-        print("设置选中状态也没有生效，改为鼠标点击")
-        leftClick(at: CGPoint(x: rowFrame.minX + 60, y: rowFrame.midY))
-        usleep(300_000)
-    }
+    select([row])
+    guard selectedCount() == 1 else { fail("没能选中「\(nameToSelect)」") }
 } else if flags.contains("--select-all") {
     select(elements(requireFileList(), kAXRowsAttribute))
 } else if flags.contains("--select-none") {
@@ -208,16 +203,15 @@ func showMenu() {
         }
         performInBackground(actions(button).contains(kAXShowMenuAction) ? kAXShowMenuAction : kAXPressAction, on: button)
     } else if flags.contains("--sidebar") {
-        // 个人文件夹在侧边栏里显示为用户名，不受系统语言影响
-        let name = NSUserName()
+        // 个人文件夹显示为用户名，不受系统语言影响，但 macOS 15 默认不在侧边栏里，所以再试「应用程序」
+        let candidates = [NSUserName(), "Applications", "应用程序"]
         guard let sidebar,
-              let item = find(in: sidebar, { candidate in
-                  [kAXValueAttribute, kAXTitleAttribute, kAXDescriptionAttribute].contains { string(candidate, $0) == name }
-              }),
+              let item = candidates.lazy.compactMap({ name in find(in: sidebar) { texts($0).contains(name) } }).first,
               let itemFrame = frame(item) else {
             sidebar.map { dump($0) }
-            fail("侧边栏里找不到「\(name)」")
+            fail("侧边栏里找不到 \(candidates) 中的任何一个")
         }
+        print("右键侧边栏的「\(texts(item).first ?? "")」")
         rightClick(at: CGPoint(x: itemFrame.midX, y: itemFrame.midY))
     } else if flags.contains("--select-none") {
         // 右键列表可见区域底部的空白处
@@ -271,8 +265,9 @@ for attempt in 1...5 {
     showMenu()
     for _ in 0..<30 {
         if let item = menuItem(titled: title) {
+            let enabled = (value(item, kAXEnabledAttribute) as? Bool) ?? true
             AXUIElementPerformAction(item, kAXPressAction as CFString)
-            print("已点击「\(title)」")
+            print("已点击「\(title)」" + (enabled ? "" : "（菜单项是灰色的）"))
             exit(0)
         }
         usleep(100_000)

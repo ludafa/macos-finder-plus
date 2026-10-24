@@ -69,7 +69,7 @@ check "全选后右键" "$DIR/a.txt
 $DIR/b c.txt" --select-all "拷贝 2 个项目的路径"
 check "右键窗口空白处" "$DIR" --select-none "拷贝当前路径"
 check "没有选中项时点工具栏按钮" "$DIR" --toolbar --select-none "拷贝当前路径"
-check "有选中项时点工具栏按钮" "$DIR/a.txt" --toolbar --select-first "拷贝 1 个选中项的路径"
+check "有选中项时点工具栏按钮" "$DIR/a.txt" --toolbar --select a.txt "拷贝 1 个选中项的路径"
 # 侧边栏不提供我们的菜单项（扩展对侧边栏菜单返回 nil）
 check "右键侧边栏" "" --sidebar --expect-absent "拷贝路径"
 
