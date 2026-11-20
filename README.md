@@ -31,6 +31,8 @@ cd macos-finder-plus
 
 脚本会编译、安装到 `~/Applications/CopyPathSync.app`，并自动注册、启用 Finder 扩展。本机编译的 App 不会被 Gatekeeper 拦截，不需要额外操作。
 
+安装后系统会提示「CopyPathSync 将在登录时自动打开」：系统更新等情况偶尔会让系统丢掉扩展的注册，右键菜单里的「拷贝路径」随之消失，所以 App 每次登录时会检查一遍，丢了就自动补回来。它没有窗口，检查完立即退出。
+
 ### 方式二：把编译好的 App 拷到另一台电脑
 
 适合对方电脑没装命令行工具的情况。注意两台电脑芯片要一致（都是 Apple Silicon 或都是 Intel）。
@@ -60,6 +62,7 @@ ditto -c -k --keepParent build/CopyPathSync.app CopyPathSync.zip
   ```bash
   pluginkit -e use -i com.ludafa.finderplus.extension
   ```
+- 执行 `pluginkit -m -i com.ludafa.finderplus.extension` 没有任何输出，说明系统丢了扩展的注册，上面的命令不起作用。重新执行 `./build.sh install`，或者执行 `pluginkit -a ~/Applications/CopyPathSync.app/Contents/PlugIns/CopyPathExtension.appex`；登录项开着的话，下次登录也会自动补回。
 - 仍然没有时，按住 Option 右键点 Dock 上的 Finder，选「重新开启」。
 
 ## 添加工具栏按钮（可选）
@@ -67,6 +70,8 @@ ditto -c -k --keepParent build/CopyPathSync.app CopyPathSync.zip
 在 Finder 窗口中选择菜单栏「显示 → 自定工具栏…」，把「拷贝路径」图标拖到工具栏上。
 
 ## 卸载
+
+先在「系统设置 → 通用 → 登录项与扩展」的「登录时打开」里移除 CopyPathSync，再执行：
 
 ```bash
 pluginkit -e ignore -i com.ludafa.finderplus.extension
@@ -79,7 +84,7 @@ rm -rf ~/Applications/CopyPathSync.app
 build.sh          编译、签名、安装脚本
 make-icon.swift   生成 App 图标
 extension/        Finder 扩展：右键菜单、工具栏按钮的全部逻辑
-host/             宿主 App：苹果规定扩展必须装在一个 App 里，它本身不做任何事
+host/             宿主 App：苹果规定扩展必须装在一个 App 里；它作为登录项在每次登录时补注册扩展
 ```
 
 修改代码后执行 `./build.sh install` 即可重新安装，脚本会自动重启扩展进程。
